@@ -168,7 +168,7 @@ All workflows follow the same hardening: actions pinned to a commit SHA
 
 | Workflow | Does |
 | -------- | ---- |
-| `ci.yml` | flake evaluation, lint + type-check + build of each app, `cargo fmt`/`clippy`/`test` on the Tauri crate, actionlint, zizmor, [osv-scanner](https://google.github.io/osv-scanner/) dependency audit (npm and Cargo lockfiles); all gated by the single `ci-required` job |
+| `ci.yml` | on a PR, only the jobs whose files changed run (see [CONTRIBUTING.md](CONTRIBUTING.md)); flake evaluation, lint + type-check + build of each app, `cargo fmt`/`clippy`/`test` on the Tauri crate, actionlint, zizmor, [osv-scanner](https://google.github.io/osv-scanner/) dependency audit (npm and Cargo lockfiles); all gated by the single `ci-required` job |
 | `ci-sast.yml` | [CodeQL](https://codeql.github.com/docs/) always, [SonarQube Cloud](https://docs.sonarsource.com/sonarqube-cloud/) when its token is set; see [`.sast/README.md`](.sast/README.md) |
 | `check-conventional-commit-pr-title.yml` | PR title is a Conventional Commit (advisory, not required) |
 | `openssf-scorecard.yml` | weekly [OpenSSF Scorecard](https://scorecard.dev/); results go to the `openssf-update` branch and an issue with a one-click PR link. The README badge reads the merged result from `main`. |

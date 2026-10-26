@@ -12,6 +12,10 @@ changing anything; they are the source of truth. The hard rules:
   Useful scopes: `desktop`, `mobile`, `ci`, `nix`.
 - **Signed, signed-off commits**: `git commit -s` with signing configured;
   the `commit-msg` hook rejects anything else.
+- The commit type list lives in both `.githooks/check-conventional-commit-msg`
+  and `.github/workflows/check-conventional-commit-pr-title.yml`; keep them
+  identical. Labels set by workflows (`openssf`, `auto-update`) are not added
+  by hand; describe any new label in CONTRIBUTING.md.
 - **Link the issue** a PR resolves (`Closes #NNN` in the body). Branch from `main`;
   never push to `main`.
 - **Workflows** (`.github/`):

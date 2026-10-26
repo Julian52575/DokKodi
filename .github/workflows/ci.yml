@@ -24,7 +24,96 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Decides which jobs have something to check. On a pull request, only the
+  # areas whose files changed run; the others are skipped (ci-required accepts
+  # a skip, never a failure). Pushes to main and manual runs check everything.
+  #
+  #   desktop-node   desktop/ outside src-tauri/   (the React frontend)
+  #   desktop-rust   desktop/src-tauri/ and any *.rs
+  #   mobile-node    mobile/
+  #   devshell       flake, nix/, justfile, .env.example, the setup action
+  #   workflows      .github/
+  #   audit          lockfiles
+  #
+  # A change to this file runs everything.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      node_apps: ${{ steps.filter.outputs.node_apps }}
+      desktop_rust: ${{ steps.filter.outputs.desktop_rust }}
+      devshell: ${{ steps.filter.outputs.devshell }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+      audit: ${{ steps.filter.outputs.audit }}
+    steps:
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the merge base with the target branch
+          persist-credentials: false
+
+      - name: Filter by changed files
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed.txt
+          else
+            echo ".github/workflows/ci.yml" > changed.txt
+          fi
+          # yes <pattern> [exclude-pattern]: true when a changed file matches.
+          yes() {
+            if [ "$all" = true ]; then echo true; return; fi
+            if grep -E "$1" changed.txt | grep -Evq "${2:-^$}"; then echo true; else echo false; fi
+          }
+          all=false
+          if grep -Eq '^\.github/workflows/ci\.yml$' changed.txt; then all=true; fi
+
+          desktop_node=$(yes '^desktop/' '^desktop/src-tauri/')
+          mobile_node=$(yes '^mobile/')
+          desktop_rust=$(yes '^desktop/src-tauri/|\.rs$')
+          devshell=$(yes '^(flake\.nix|flake\.lock|nix/|justfile$|\.env\.example$|\.github/actions/)')
+          workflows=$(yes '^\.github/')
+          audit=$(yes '(^|/)(package-lock\.json|Cargo\.lock)$')
+
+          apps=()
+          [ "$desktop_node" = true ] && apps+=('"desktop"')
+          [ "$mobile_node" = true ] && apps+=('"mobile"')
+          node_apps="[$(IFS=,; echo "${apps[*]:-}")]"
+
+          {
+            echo "node_apps=$node_apps"
+            echo "desktop_rust=$desktop_rust"
+            echo "devshell=$devshell"
+            echo "workflows=$workflows"
+            echo "audit=$audit"
+          } >> "$GITHUB_OUTPUT"
+
+          show() {
+            if [ "$2" = true ]; then echo "| $1 | ✅ runs |"; else echo "| $1 | ⏭ skipped: no relevant change |"; fi
+          }
+          {
+            echo "### Which jobs run"
+            echo
+            echo "| Area | Result |"
+            echo "| --- | --- |"
+            show "desktop frontend (node)" "$desktop_node"
+            show "desktop backend (rust)" "$desktop_rust"
+            show "mobile (node)" "$mobile_node"
+            show "devshell" "$devshell"
+            show "workflows (actionlint, zizmor)" "$workflows"
+            show "dependency audit" "$audit"
+          } >> "$GITHUB_STEP_SUMMARY"
   devshell:
+    needs: changes
+    if: needs.changes.outputs.devshell == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -69,6 +158,8 @@ jobs:
   # Every workflow under .github/workflows, including a shellcheck pass on each
   # `run:` script (bundled in the actionlint image).
   workflow-lint:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -101,6 +192,8 @@ jobs:
   # Security audit of every workflow and action; findings show as PR annotations.
   # Keep the version in sync with nix/zizmor.nix.
   zizmor:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -139,6 +232,8 @@ jobs:
   # count as Moderate. Counts and advisories land in the job summary and the
   # raw report uploads as an artifact, pass or fail.
   dependencies-audit:
+    needs: changes
+    if: needs.changes.outputs.audit == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -222,13 +317,15 @@ jobs:
 
   # Lint, type-check and build each JavaScript app in its own folder.
   node:
+    needs: changes
+    if: needs.changes.outputs.node_apps != '[]'
     name: node (${{ matrix.app }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        app: [desktop, mobile]
+        app: ${{ fromJSON(needs.changes.outputs.node_apps) }}
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -287,6 +384,8 @@ jobs:
   # The Tauri backend: format, lint and test the Rust crate. The frontend is
   # built first because tauri::generate_context! embeds ../dist.
   desktop-rust:
+    needs: changes
+    if: needs.changes.outputs.desktop_rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -355,6 +454,7 @@ jobs:
   ci-required:
     if: always()
     needs:
+      - changes
       - devshell
       - workflow-lint
       - zizmor
@@ -380,8 +480,9 @@ jobs:
             echo "| --- | --- |"
             echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key) | \(if .value.result == "success" then "✅ passed" elif .value.result == "failure" then "❌ failed" else "⚪ " + .value.result end) |"'
           } >> "$GITHUB_STEP_SUMMARY"
-          # Anything but `success` (failure, cancelled, skipped) fails the gate.
-          if printf '%s\n' "$RESULTS" | tr ' ' '\n' | grep -vqx 'success'; then
+          # A job skipped because nothing it checks changed is fine; a failure,
+          # a cancellation or a failed `changes` job fails the gate.
+          if printf '%s\n' "$RESULTS" | tr ' ' '\n' | grep -vqxE 'success|skipped'; then
             echo "a required job did not succeed: $RESULTS"
             exit 1
           fi
