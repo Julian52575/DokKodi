@@ -54,6 +54,18 @@ jobs:
             cargo --version
           '
 
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon devshell"
+            echo
+            echo "The flake evaluates and the dev shell starts: **$STATUS**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Every workflow under .github/workflows, including a shellcheck pass on each
   # `run:` script (bundled in the actionlint image).
   workflow-lint:
@@ -74,6 +86,18 @@ jobs:
           docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
           -color
 
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon workflow-lint"
+            echo
+            echo "actionlint (with shellcheck on every \`run:\` script): **$STATUS**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Security audit of every workflow and action; findings show as PR annotations.
   # Keep the version in sync with nix/zizmor.nix.
   zizmor:
@@ -92,6 +116,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }} # online audits (impostor commits, known-vulnerable actions)
         run: pipx run zizmor==1.31.1 --format github .github/
+
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon zizmor"
+            echo
+            echo "Security audit of the workflows: **$STATUS**. Findings are annotated on the changed files."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Software-composition analysis of THIS branch: osv-scanner finds every
   # lockfile in the repo (npm, pip, go, cargo, maven, ...) and checks it
@@ -213,7 +249,10 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
-      - run: npm test --if-present
+      - name: Test with coverage
+        run: |
+          set -o pipefail
+          npm test --if-present 2>&1 | tee ../test.log
       - name: Type-check and build the desktop frontend
         if: matrix.app == 'desktop'
         run: npm run build
@@ -224,6 +263,26 @@ jobs:
       - name: Export the Android bundle
         if: matrix.app == 'mobile'
         run: npx expo export --platform android
+
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+          APP: ${{ matrix.app }}
+        working-directory: .
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon node ($APP)"
+            echo
+            echo "Lint, type-check and tests: **$STATUS**."
+            echo
+            if [ -s test.log ]; then
+              echo '```'
+              sed -E 's/\x1b\[[0-9;]*m//g' test.log | grep -E '^ *(Test Files|Tests|Test Suites)|^(Statements|Branches|Functions|Lines)|^All files' || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # The Tauri backend: format, lint and test the Rust crate. The frontend is
   # built first because tauri::generate_context! embeds ../dist.
@@ -266,8 +325,30 @@ jobs:
         working-directory: desktop/src-tauri
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: desktop/src-tauri
-      - run: cargo test
+      - name: cargo test
         working-directory: desktop/src-tauri
+        run: |
+          set -o pipefail
+          cargo test 2>&1 | tee ../../rust-test.log
+
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        working-directory: .
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon desktop-rust"
+            echo
+            echo "Format (\`cargo fmt\`), lint (\`clippy\`) and tests: **$STATUS**."
+            echo
+            if [ -s rust-test.log ]; then
+              echo '```'
+              grep -E '^test result' rust-test.log || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Single stable check for the branch ruleset to require.
   # Add a job to `needs` here to make it mandatory to the branch ruleset.
@@ -290,7 +371,15 @@ jobs:
       - name: Every required job passed
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          NEEDS: ${{ toJSON(needs) }}
         run: |
+          {
+            echo "### CI result"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key) | \(if .value.result == "success" then "✅ passed" elif .value.result == "failure" then "❌ failed" else "⚪ " + .value.result end) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
           # Anything but `success` (failure, cancelled, skipped) fails the gate.
           if printf '%s\n' "$RESULTS" | tr ' ' '\n' | grep -vqx 'success'; then
             echo "a required job did not succeed: $RESULTS"

@@ -21,6 +21,7 @@ node_modules/
 /mobile/android/
 /mobile/ios/
 *.tsbuildinfo
+coverage/
 *.jks
 *.keystore
 Zone.Identifier

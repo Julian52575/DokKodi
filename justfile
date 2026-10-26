@@ -33,9 +33,9 @@ desktop-dev: _deps
 desktop-build:
     cd desktop && npm run tauri build
 
-# Lint, type-check and test the desktop app (frontend and Rust)
+# Lint, test (with coverage) and build the desktop app, then fmt, clippy and test the Rust crate
 desktop-check:
-    cd desktop && npm run lint && npm run build
+    cd desktop && npm run lint && npm test && npm run build
     cd desktop/src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 #### Mobile (Expo, Android)
@@ -56,9 +56,9 @@ mobile-prebuild: _deps
 mobile-apk abi="arm64-v8a": mobile-prebuild
     cd mobile/android && ./gradlew assembleRelease --no-daemon --console=plain -x lint -PreactNativeArchitectures={{abi}}
 
-# Lint and type-check the mobile app
+# Lint, type-check and test (with coverage) the mobile app
 mobile-check:
-    cd mobile && npm run lint && npx tsc --noEmit
+    cd mobile && npm run lint && npx tsc --noEmit && npm test
 
 #### Everything
 
