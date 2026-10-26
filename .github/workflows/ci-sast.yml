@@ -92,8 +92,7 @@ jobs:
         if: needs.guard.outputs.run == 'true'
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          # CUSTOMISE: one entry per language in the repo.
-          languages: actions, javascript-typescript
+          languages: actions, javascript-typescript, rust
           build-mode: none
           config-file: .sast/codeql-config.yml
 
@@ -150,10 +149,6 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
-
-      # CUSTOMISE: generate coverage here (SonarQube only imports reports) and
-      # point sonar-project.properties at them, or the new-code coverage
-      # condition reports 0%.
 
       - name: SonarQube scan
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0

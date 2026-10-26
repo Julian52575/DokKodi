@@ -1,49 +1,62 @@
 # Contributing
 
-Nothing reaches `main` except through a pull request, and pull requests
-should close the issue they resolve. Read the [README](README.md) for the stack itself, and follow
-the [Code of Conduct](CODE_OF_CONDUCT.md).
+Nothing reaches `main` except through a pull request that closes an issue.
+Read the [README](README.md) for the stack and follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Setup
+## Quick start
 
-1. `nix develop` (or `direnv allow`): creates `.env`, fills `change-me-*`
-   secrets, enables the git hooks.
-2. `just up -d`, then open <http://localhost:8000>.
+1. Install [Nix](https://install.determinate.systems/) with flakes and run
+   `nix develop` (or `direnv allow`). It provides every tool, creates `.env`
+   and enables the git hooks.
+2. Set up commit signing once ([how](#2-branch-and-commits)).
+3. `just install`, then `just dev` to run the desktop app and the Expo server
+   together (`just desktop-dev` or `just mobile-start` for one of them).
+   The first interactive `nix develop` also offers to install the Android SDK
+   for mobile builds; answer `n` or set `ANDROID_SDK_INSTALL=0` in `.env` to
+   skip it.
+4. Before every push, run `just ci`. It runs the same checks as CI.
 
-Without Nix: `cp .env.example .env`, install `just` and Podman or Docker, and
-run `git config core.hooksPath .githooks`.
+No Nix? See [Requirements](README.md#requirements) in the README.
 
-## The chain
+| Where | What |
+| ----- | ---- |
+| `desktop/src/` | desktop frontend (React, Vite, Tailwind, shadcn/ui) |
+| `desktop/src-tauri/` | desktop backend (Rust); `#[tauri::command]` functions are called from React with `invoke` |
+| `mobile/` | Android app (Expo, React Native, NativeWind) |
+| `nix/`, `flake.nix` | the dev shell, one pinned tool per file |
+| `.github/workflows/` | CI, releases, security scans |
+
+## From idea to release
 
 ```mermaid
 flowchart LR
     ISSUE["Issue"] --> BRANCH["Branch"] --> PR["Pull request"]
-    ISSUE -- "Closes #NNN" --> PR
     PR -- "checks green + 1 approval + squash" --> MAIN["main"]
     MAIN -- "merge the Release PR" --> RELEASE["Release"]
 ```
 
-### 1. Issues
+### 1. Issue
 
-- Open issues through one of the four forms (Feature, Bug, R&D, Debt); blank
-  issues are disabled. Each form adds its type label and `needs-triage`.
-- **Never** report a vulnerability in a public issue; use the private
-  security advisory linked from the *New issue* page.
-- `openssf` and `auto-update` labels are set by workflows, not by hand. When
-  you add a label, describe it and list it here.
+Open one with a form (Feature, Bug, R&D or Debt). To report a vulnerability,
+use the private security advisory linked from the *New issue* page, never a
+public issue.
 
-### 2. Branches and commits
+### 2. Branch and commits
 
-- Branch from `main` (`feat/add-grid`, `42-fix-proxy-crash`). No direct pushes
-  to `main`; rebase rather than merging `main` in.
-- Commits and PR titles are [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary):
-  `<type>[(scope)][!]: description`, lower-case description, no trailing
-  period. Types: `feat fix docs style refactor perf test build ci chore revert`.
-  [Cheatsheet](https://gist.github.com/qoomon/5dfcdf8eec66a051ecd85625518cfd13#commit-message-formats).
-- The type sets the next version: `fix` → patch, `feat` → minor, `!` or a
-  `BREAKING CHANGE:` footer → major; other types don't release.
-- Commits must be **signed off** (`git commit -s`) and **signed**. One-time
-  SSH signing setup, then add the key on GitHub as a *Signing Key*
+- Branch from `main` (`feat/add-settings-page`, `42-fix-window-crash`); never
+  push to `main`, and rebase rather than merge `main` in.
+- Commit messages and PR titles are
+  [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary):
+  `<type>[(scope)][!]: description`, lower-case, no trailing period, for
+  example `feat(mobile): add a settings screen`. Types: `feat fix docs style
+  refactor perf test build ci chore revert`; scopes: `desktop`, `mobile`,
+  `ci`, `nix`, `docs`.
+- The type sets the next version: `fix` is a patch, `feat` a minor, `!` or a
+  `BREAKING CHANGE:` footer a major. Other types don't release.
+
+- Commits must be **signed off** (`git commit -s`) and **signed**. One-time SSH
+  signing setup, then add the key on GitHub as a *Signing Key*
   ([docs](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)):
 
   ```bash
@@ -52,84 +65,59 @@ flowchart LR
   git config --global commit.gpgsign true
   ```
 
-The `commit-msg` hook checks all of this locally (opt out of the signing part
-with `git config hooks.requireSignature false`). It is only feedback —
-`--no-verify` skips it; CI and the ruleset are the real gate. The type list
-lives in both `.githooks/check-conventional-commit-msg` and
-`check-conventional-commit-pr-title.yml`; keep them identical.
+The `commit-msg` hook checks all of this locally. It is only feedback; CI and
+the branch ruleset are the real gate. Opt out of the signature check with
+`git config hooks.requireSignature false`.
 
-### 3. Pull requests
+### 3. Pull request
 
 - Fill in the template and link the issue with `Closes #NNN`. The PR title
   becomes the squash commit on `main`.
-- 1 approval (plus code owners where set) and every thread resolved.
-- The ruleset requires a single check, `ci-required`, on a branch up to date
-  with `main`. It aggregates the `ci.yml` jobs below; `conventional-title`
-  runs too but is advisory.
+- It needs 1 approval, every thread resolved, and the single required check
+  `ci-required` green on a branch up to date with `main`.
 
-| Check | Enforces | Reproduce locally |
-| ----- | -------- | ----------------- |
-| `conventional-title` (advisory) | PR title (and a lone commit) is a Conventional Commit | — edit the title, it re-runs |
-| `ci-required` ← `devshell` | the flake evaluates | `nix flake check --no-build` |
-| `ci-required` ← `node` | each Node.js service lints, tests and builds | `npm run lint && npm test` in its folder |
-| `ci-required` ← `dockerfile-lint` | hadolint on every Dockerfile | `hadolint <file>` |
-| `ci-required` ← `compose-lint` | compose file resolves | `podman-compose config` |
-| `ci-required` ← `workflow-lint`, `zizmor` | workflows lint clean and pass the security audit | `just lint-workflows` |
-| `ci-required` ← `dependencies-audit` | no Critical/High and fewer than 5 Moderate+Low advisories | bump the dependency |
-| `ci-required` ← `stack` | the stack boots and every route answers | `just up -d && just logs` |
-| `ci-sast-required` (opt-in) | no CodeQL error; SonarQube gate passes | see [`.sast/README.md`](.sast/README.md) |
+**Reading the CI feedback.** Open the run's **Summary** page (the *Details*
+link on a check, then *Summary*). Every job writes a short result there, so
+you don't need the logs to see what happened:
 
-Before opening: issue linked, PR title a Conventional Commit, branch rebased, `just lint-workflows` run if you
-touched `.github/`, tests and docs updated, AI-assisted changes reviewed line
-by line.
+- **Which jobs run** lists what the PR touched and what was skipped.
+- Each job has a one-line verdict (✅ passed, ❌ failed, ⚪ skipped); the
+  test jobs add their test counts and coverage.
+- **CI result** is the table behind `ci-required`.
 
-### 4. Releases
+Only jobs whose files changed run on a PR; `ci-required` accepts a skip but
+never a failure. A change to `ci.yml`, a push to `main` and a manual run check
+everything.
+
+| Job | Runs when the PR touches | Reproduce locally |
+| --- | ------------------------ | ----------------- |
+| `node` (desktop) | `desktop/` outside `src-tauri/` | `just desktop-check` |
+| `node` (mobile) | `mobile/` | `just mobile-check` |
+| `rust` (desktop) | `desktop/src-tauri/` or any `*.rs` | `just desktop-check` |
+| `devshell` | `flake.nix`, `flake.lock`, `nix/`, `justfile`, `.env.example` | `nix flake check --no-build` |
+| `workflow-lint`, `zizmor` | `.github/` | `just lint-workflows` |
+| `dependencies-audit` | a `package-lock.json` or `Cargo.lock` | bump the dependency |
+
+Also on every PR: `conventional-title` (advisory: is the title a Conventional
+Commit?), and the opt-in `ci-sast-required` (CodeQL, SonarQube; see
+[`.sast/README.md`](.sast/README.md)).
+
+Before opening: issue linked, title a Conventional Commit, branch rebased,
+`just ci` green, tests and docs updated, AI-assisted changes reviewed line by
+line.
+
+### 4. Release
 
 Never by hand. release-please keeps a Release PR open with the next version
-and changelog; merging it tags the release (no `v` prefix), and
-`release-to-ghcr.yml` publishes signed images.
-
-## Tools in the dev shell
-
-`just`, `podman`/`podman-compose`, `actionlint` + `shellcheck`, `zizmor`
-(same version as CI), `check-jsonschema`, `pin-github-action` (pins `uses:` to
-commit SHAs) and `jq`.
+and changelog; merging it tags the release, and `release-to-installer.yml`
+attaches `DokKodi-Desktop-linux-amd64.deb`, `DokKodi-Desktop-windows-x64.msi`
+and `DokKodi-Remote-android-universal.apk` to it.
 
 ## Troubleshooting
 
-**Stack not working?** Run `just compose-diagnostic` first. It checks the
-container tool, `.env`, the compose file, each container's state, health and
-logs, the host ports, Traefik's routes and the disk, then lists what looks
-wrong in plain words. The full report (logs and state) is saved as
-`.compose-diagnostic-<time>.md` (git-ignored) with `.env` values and other
-credentials masked: skim it, then attach it to your bug issue or send it to
-the DevOps team.
-
-Record every incident under [`docs/troubleshooting/`](docs/troubleshooting/),
-in a subfolder per area, one Markdown file per incident:
-
-```
-docs/troubleshooting/
-├── podman/not-a-directory-on-wsl.md
-├── ci/stack-job-timeout.md
-└── backend/prisma-openssl-missing.md
-```
-
-Each file names the **Error** (what was observed), its **Occurrences**
-(dates, environment), the **Cause** and the **Solution**, written for someone
-who wasn't there. Same cause as an existing entry? Add an occurrence to it
-instead of a new file; link related entries by relative path. Example:
-
-```markdown
-# Podman "Not a directory" when starting the stack
-
-**Error:** `just up` fails with `mount ... not a directory` on every container.
-
-**Occurrences:** 2026-01-01 (WSL2, repo under /mnt/c).
-
-**Cause:** the repo sits on a network/virtualised filesystem; overlay storage
-needs POSIX semantics.
-
-**Solution:** set `PODMAN_STORAGE_DIR` to a path on a local disk, or move the
-repo into the Linux filesystem.
-```
+Hit a problem and solved it? Add a Markdown file under
+[`docs/troubleshooting/`](docs/troubleshooting/), in a subfolder per area,
+with the **Error** (what you saw), **Occurrences** (dates, environment),
+**Cause** and **Solution**, written for someone who wasn't there. Same cause
+as an existing entry? Add an occurrence to it instead. See
+[`nix/disk-space.md`](docs/troubleshooting/nix/disk-space.md) for an example.

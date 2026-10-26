@@ -24,11 +24,98 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Decides which jobs have something to check. On a pull request, only the
+  # areas whose files changed run; the others are skipped (ci-required accepts
+  # a skip, never a failure). Pushes to main and manual runs check everything.
+  #
+  #   node (desktop)  desktop/ outside src-tauri/   (the React frontend)
+  #   node (mobile)   mobile/
+  #   rust (desktop)  desktop/src-tauri/ and any *.rs
+  #   devshell        flake, nix/, justfile, .env.example, the setup action
+  #   workflows       .github/
+  #   audit           lockfiles
+  #
+  # A change to this file runs everything.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      node_apps: ${{ steps.filter.outputs.node_apps }}
+      desktop_rust: ${{ steps.filter.outputs.desktop_rust }}
+      devshell: ${{ steps.filter.outputs.devshell }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+      audit: ${{ steps.filter.outputs.audit }}
+    steps:
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the merge base with the target branch
+          persist-credentials: false
+
+      - name: Filter by changed files
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed.txt
+          else
+            echo ".github/workflows/ci.yml" > changed.txt
+          fi
+          # yes <pattern> [exclude-pattern]: true when a changed file matches.
+          yes() {
+            if [ "$all" = true ]; then echo true; return; fi
+            if grep -E "$1" changed.txt | grep -Evq "${2:-^$}"; then echo true; else echo false; fi
+          }
+          all=false
+          if grep -Eq '^\.github/workflows/ci\.yml$' changed.txt; then all=true; fi
+
+          desktop_node=$(yes '^desktop/' '^desktop/src-tauri/')
+          mobile_node=$(yes '^mobile/')
+          desktop_rust=$(yes '^desktop/src-tauri/|\.rs$')
+          devshell=$(yes '^(flake\.nix|flake\.lock|nix/|justfile$|\.env\.example$|\.github/actions/)')
+          workflows=$(yes '^\.github/')
+          audit=$(yes '(^|/)(package-lock\.json|Cargo\.lock)$')
+
+          apps=()
+          [ "$desktop_node" = true ] && apps+=('"desktop"')
+          [ "$mobile_node" = true ] && apps+=('"mobile"')
+          node_apps="[$(IFS=,; echo "${apps[*]:-}")]"
+
+          {
+            echo "node_apps=$node_apps"
+            echo "desktop_rust=$desktop_rust"
+            echo "devshell=$devshell"
+            echo "workflows=$workflows"
+            echo "audit=$audit"
+          } >> "$GITHUB_OUTPUT"
+
+          show() {
+            if [ "$2" = true ]; then echo "| $1 | ✅ runs |"; else echo "| $1 | ⏭ skipped: no relevant change |"; fi
+          }
+          {
+            echo "### Which jobs run"
+            echo
+            echo "| Area | Result |"
+            echo "| --- | --- |"
+            show "desktop frontend (node)" "$desktop_node"
+            show "desktop backend (rust)" "$desktop_rust"
+            show "mobile (node)" "$mobile_node"
+            show "devshell" "$devshell"
+            show "workflows (actionlint, zizmor)" "$workflows"
+            show "dependency audit" "$audit"
+          } >> "$GITHUB_STEP_SUMMARY"
   devshell:
+    needs: changes
+    if: needs.changes.outputs.devshell == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      PODMAN_NO_SOCKET: "1" # don't spawn a Podman API socket in CI
     steps:
       - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
@@ -52,72 +139,27 @@ jobs:
         run: |
           nix develop --command bash -euo pipefail -c '
             just --list
-            podman --version
-            podman-compose -f docker-compose.yml config >/dev/null
+            node --version
+            cargo --version
           '
 
-  # Every Dockerfile / Containerfile tracked in the repo -- a new one is
-  # picked up without touching this workflow. Mounts the repo so hadolint
-  # reads a root .hadolint.yaml if one exists.
-  dockerfile-lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Lint every Dockerfile with hadolint
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
         run: |
-          set -uo pipefail
-          mapfile -t files < <(git ls-files -- \
-            '*Dockerfile' '*Dockerfile.*' '*Containerfile' '*Containerfile.*')
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "no Dockerfile found"
-            exit 0
-          fi
-
-          failed=0
-          for f in "${files[@]}"; do
-            echo "--- $f"
-            # hadolint v2.12.0
-            if docker run --rm -v "$PWD:/repo:ro" -w /repo \
-              docker.io/hadolint/hadolint@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e \
-              hadolint "$f"; then
-              echo "ok    $f"
-            else
-              echo "::error file=$f::hadolint reported issues in $f"
-              failed=1
-            fi
-          done
-          exit "$failed"
-
-  # The compose file parses and interpolates cleanly with the example .env.
-  compose-lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Load .env
-        run: cp .env.example .env
-
-      - name: Validate docker-compose.yml
-        run: docker compose config --quiet
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon devshell"
+            echo
+            echo "The flake evaluates and the dev shell starts: **$STATUS**."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Every workflow under .github/workflows, including a shellcheck pass on each
   # `run:` script (bundled in the actionlint image).
   workflow-lint:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -135,9 +177,23 @@ jobs:
           docker.io/rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
           -color
 
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon workflow-lint"
+            echo
+            echo "actionlint (with shellcheck on every \`run:\` script): **$STATUS**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Security audit of every workflow and action; findings show as PR annotations.
   # Keep the version in sync with nix/zizmor.nix.
   zizmor:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -154,6 +210,18 @@ jobs:
           GH_TOKEN: ${{ github.token }} # online audits (impostor commits, known-vulnerable actions)
         run: pipx run zizmor==1.31.1 --format github .github/
 
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon zizmor"
+            echo
+            echo "Security audit of the workflows: **$STATUS**. Findings are annotated on the changed files."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Software-composition analysis of THIS branch: osv-scanner finds every
   # lockfile in the repo (npm, pip, go, cargo, maven, ...) and checks it
   # against the OSV database, so it needs no per-language setup.
@@ -164,6 +232,8 @@ jobs:
   # count as Moderate. Counts and advisories land in the job summary and the
   # raw report uploads as an artifact, pass or fail.
   dependencies-audit:
+    needs: changes
+    if: needs.changes.outputs.audit == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -245,18 +315,20 @@ jobs:
           path: dependency-audit
           if-no-files-found: ignore
 
-  # Lint, test and build each Node.js service in its own folder.
+  # Lint, type-check and build each JavaScript app in its own folder.
   node:
-    name: node (${{ matrix.service }})
+    needs: changes
+    if: needs.changes.outputs.node_apps != '[]'
+    name: node (${{ matrix.app }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        service: [backend, frontend] # CUSTOMISE: one entry per Node.js service
+        app: ${{ fromJSON(needs.changes.outputs.node_apps) }}
     defaults:
       run:
-        working-directory: ${{ matrix.service }}
+        working-directory: ${{ matrix.app }}
     steps:
       - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
@@ -270,27 +342,59 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
 
       - run: npm ci
       - run: npm run lint
-      - name: Generate the Prisma client
-        if: hashFiles(format('{0}/prisma/schema.prisma', matrix.service)) != ''
-        run: npx prisma generate
-      - run: npm test
-      - name: Build
-        if: matrix.service == 'frontend'
+      - name: Test with coverage
+        run: |
+          set -o pipefail
+          npm test --if-present 2>&1 | tee ../test.log
+      - name: Type-check and build the desktop frontend
+        if: matrix.app == 'desktop'
         run: npm run build
+      - name: Type-check the mobile app
+        if: matrix.app == 'mobile'
+        run: npx tsc --noEmit
+      # Bundles the JavaScript for Android without needing the Android SDK.
+      - name: Export the Android bundle
+        if: matrix.app == 'mobile'
+        run: npx expo export --platform android
 
-  # How the services work together: boots the whole compose stack and calls
-  # every route through the proxy. CUSTOMISE the checks when you replace the
-  # example services.
-  stack:
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+          APP: ${{ matrix.app }}
+        working-directory: .
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon node ($APP)"
+            echo
+            echo "Lint, type-check and tests: **$STATUS**."
+            echo
+            if [ -s test.log ]; then
+              echo '```'
+              sed -E 's/\x1b\[[0-9;]*m//g' test.log | grep -E '^ *(Test Files|Tests|Test Suites)|^(Statements|Branches|Functions|Lines)|^All files' || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The Tauri backend: format, lint and test the Rust crate. The frontend is
+  # built first because tauri::generate_context! embeds ../dist.
+  rust:
+    name: rust (desktop)
+    needs: changes
+    if: needs.changes.outputs.desktop_rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60 # the first apt install is slow; later runs reuse its cache
     env:
-      PROXY: http://127.0.0.1:8000
-      DASHBOARD: http://127.0.0.1:8080
+      CARGO_INCREMENTAL: "0" # a CI build starts clean; incremental data only bloats the cache
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
@@ -300,72 +404,115 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Load .env
-        run: cp .env.example .env
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
 
-      - name: Build and start the stack, waiting for healthchecks
-        run: docker compose up -d --build --wait --wait-timeout 300
+      # The WebKit -dev closure is the slow part, so keep the downloaded .deb
+      # files. Bump the v1 in the key to force a refresh. A cache saved on main
+      # is readable by every PR; one saved inside a PR only by that PR.
+      - name: Restore the apt downloads
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-libwebkit2gtk-4.1-dev-v1
 
-      - name: Call every service through the proxy
+      # Compiling needs only this -dev package: it depends on GTK 3, libsoup 3,
+      # GLib, Cairo, Pango and D-Bus. librsvg is for bundling and nothing in
+      # Cargo.lock needs OpenSSL.
+      - name: Install the Tauri system libraries
+        working-directory: .
         run: |
-          set -euo pipefail
-          # Traefik picks up routes asynchronously; retry before failing. $2 must
-          # appear in the body, or an unrouted /api would pass on the
-          # frontend's catch-all HTML.
-          check() {
-            for _ in $(seq 1 30); do
-              curl -fsS "$1" | grep -qF -- "$2" && { echo "ok    $1"; return 0; }
-              sleep 1
-            done
-            echo "::error::$1 did not answer with '$2'"
-            return 1
-          }
-          check "$PROXY/" '<div id="root">'
-          check "$PROXY/api/health" '"status":"ok"'
-          check "$PROXY/api/items" '[' # reaches Postgres through Prisma
-          check "$DASHBOARD/api/rawdata" '"routers"'
+          # Refresh the Ubuntu archive only: the runner's other sources (Microsoft,
+          # Azure, Chrome, ...) make a full update slow and are not needed here.
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=/dev/null \
+            -o APT::Get::List-Cleanup=0
+          mkdir -p "$HOME/apt-archives/partial"
+          sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::archives="$HOME/apt-archives" \
+            libwebkit2gtk-4.1-dev
+          sudo chown -R "$USER" "$HOME/apt-archives"
 
-      # Every volume must be named: anonymous ones escape compose-diagnostic
-      # and cleanup. A VOLUME declared by an image needs a named mount too.
-      - name: No anonymous volumes
+      - name: Save the apt downloads
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-libwebkit2gtk-4.1-dev-v1
+
+      # clippy (check) and test (build) cannot share compiled artifacts, but
+      # both reuse the dependencies compiled by an earlier run. A PR with a
+      # new Cargo.lock starts from main's closest cache.
+      - name: Restore the Cargo build
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - run: npm ci
+      - run: npm run build
+      - run: cargo fmt --check
+        working-directory: desktop/src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: desktop/src-tauri
+      - name: cargo test
+        working-directory: desktop/src-tauri
         run: |
-          set -euo pipefail
-          project=$(docker compose config --format json | jq -r .name)
-          fail=0
-          for c in $(docker compose ps -aq); do
-            while read -r type name dest; do
-              [ "$type" = volume ] || continue
-              label=$(docker volume inspect "$name" --format '{{index .Labels "com.docker.compose.project"}}')
-              if [ "$label" != "$project" ]; then
-                echo "::error::$(docker inspect "$c" --format '{{.Name}}') mounts an anonymous volume at $dest; name it in docker-compose.yml"
-                fail=1
-              fi
-            done < <(docker inspect "$c" --format '{{range .Mounts}}{{.Type}} {{.Name}} {{.Destination}}{{println}}{{end}}')
-          done
-          [ "$fail" = 0 ] && echo "ok    every volume is named"
-          exit "$fail"
+          set -o pipefail
+          cargo test 2>&1 | tee ../../rust-test.log
 
-      - name: Show logs on failure
-        if: failure()
-        run: docker compose logs --no-color
+      # Saved even when a test failed: the compiled dependencies are still good.
+      - name: Save the Cargo build
+        if: "!cancelled() && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'"
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
 
-      - name: Tear down
+      - name: Job summary
         if: always()
-        run: docker compose down --volumes --remove-orphans
+        env:
+          STATUS: ${{ job.status }}
+        working-directory: .
+        run: |
+          icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
+          {
+            echo "### $icon rust (desktop)"
+            echo
+            echo "Format (\`cargo fmt\`), lint (\`clippy\`) and tests: **$STATUS**."
+            echo
+            if [ -s rust-test.log ]; then
+              echo '```'
+              grep -E '^test result' rust-test.log || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Single stable check for the branch ruleset to require.
   # Add a job to `needs` here to make it mandatory to the branch ruleset.
   ci-required:
     if: always()
     needs:
+      - changes
       - devshell
-      - dockerfile-lint
-      - compose-lint
       - workflow-lint
       - zizmor
       - node
+      - rust
       - dependencies-audit
-      - stack
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -376,9 +523,18 @@ jobs:
       - name: Every required job passed
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          # Anything but `success` (failure, cancelled, skipped) fails the gate.
-          if printf '%s\n' "$RESULTS" | tr ' ' '\n' | grep -vqx 'success'; then
+          {
+            echo "### CI result"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key) | \(if .value.result == "success" then "✅ passed" elif .value.result == "failure" then "❌ failed" else "⚪ " + .value.result end) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # A job skipped because nothing it checks changed is fine; a failure,
+          # a cancellation or a failed `changes` job fails the gate.
+          if printf '%s\n' "$RESULTS" | tr ' ' '\n' | grep -vqxE 'success|skipped'; then
             echo "a required job did not succeed: $RESULTS"
             exit 1
           fi

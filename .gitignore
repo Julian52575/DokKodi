@@ -1,10 +1,3 @@
-# --- rootless Podman (see flake.nix) ---------------------------------
-# Per-machine container storage and the storage.conf generated for it on
-# every shell entry. containers.conf / registries.conf / policy.json under
-# .config/podman/ ARE tracked -- they're real project config.
-/.containers/
-.config/podman/storage.conf
-
 # --- local environment ----------------------------------------------
 .env
 
@@ -18,12 +11,17 @@ result-*
 # --- SAST scratch (see .sast/README.md) --------------------------
 /.sast/codeql-results/
 
-# --- database backups (`just database-dump`) -------------------------
-db_backup_*.dump
-db_backup_*.sql
-
-# --- python (adapt.py) -------------------------------------------
-__pycache__/
-
-# --- `just compose-diagnostic` reports --------------------------------
-.compose-diagnostic-*.md
+# --- desktop (Tauri) / mobile (Expo) builds ------------------------
+node_modules/
+/desktop/dist/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+/mobile/dist/
+/mobile/.expo/
+/mobile/android/
+/mobile/ios/
+*.tsbuildinfo
+coverage/
+*.jks
+*.keystore
+Zone.Identifier

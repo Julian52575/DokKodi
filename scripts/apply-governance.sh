@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Apply this template's GitHub repository governance in one run.
+# Apply this project's GitHub repository governance in one run.
 #
 # Idempotent-ish: re-running recreates the ruleset (old one is deleted first)
 # and re-PATCHes settings to the same values.
 #
 # Requires: gh (GitHub CLI) authenticated as a repo admin -- `gh auth login`.
 # The built-in Actions GITHUB_TOKEN cannot change these, so this is a one-time
-# manual step for whoever owns the repo made from the template.
+# manual step for whoever owns the repository.
 #
 # Usage:
 #   scripts/apply-governance.sh                # act on the repo of the current dir
@@ -43,13 +43,13 @@ try() {
 
 echo "==> Branch ruleset on the default branch"
 # Delete an existing ruleset of the same name so this stays repeatable.
-existing="$(gh api "repos/$repo/rulesets" --jq '.[] | select(.name=="Auto Big-3-Governance main ruleset") | .id' 2>/dev/null || true)"
+existing="$(gh api "repos/$repo/rulesets" --jq '.[] | select(.name=="DokKodi main ruleset") | .id' 2>/dev/null || true)"
 if [ -n "$existing" ]; then
   echo "    replacing existing ruleset id $existing"
   gh api --method DELETE "repos/$repo/rulesets/$existing" >/dev/null
 fi
 gh api --method POST "repos/$repo/rulesets" --input "$ruleset_file" >/dev/null
-echo "    created ruleset 'Auto Big-3-Governance main ruleset'"
+echo "    created ruleset 'DokKodi main ruleset'"
 
 echo "==> Pull-request / merge settings"
 gh api --method PATCH "repos/$repo" \
@@ -94,4 +94,4 @@ CATTOOL=$(command -v lolcat >/dev/null 2>&1 && echo lolcat || echo cat)
 echo
 echo "==> Done. Review at: https://github.com/$repo/settings/rules" | $CATTOOL
 echo
-echo "    Next: ./adapt.py --gh-vars to set secrets, ./adapt.py --workflow to check." | $CATTOOL
+echo "    Next: add the Actions secrets listed in CONTRIBUTING.md." | $CATTOOL

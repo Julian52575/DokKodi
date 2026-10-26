@@ -35,7 +35,7 @@ Runs with `build-mode: none` and `upload: never`, so it needs neither GitHub
 Advanced Security nor code scanning. The job fails on any **error**-severity
 result; warnings and notes are only reported.
 
-- **Languages:** `languages:` in `ci-sast.yml` (ships with `actions, javascript-typescript`). Compiled
+- **Languages:** `languages:` in `ci-sast.yml` (`actions, javascript-typescript, rust`). Compiled
   languages may need another
   [build mode](https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages).
 - **Paths and query suite:** [`codeql-config.yml`](codeql-config.yml)
@@ -48,9 +48,9 @@ result; warnings and notes are only reported.
 1. Create an organisation and project at <https://sonarcloud.io>, and turn
    **Automatic Analysis off** (it conflicts with the CI scan).
 2. Add the analysis token as the `SONARQUBE_TOKEN` secret.
-3. Fill in the `REPLACE_WITH_*` keys in `sonar-project.properties`.
+3. Check the organisation and project keys in `sonar-project.properties`.
 4. Let one run land on `main` before expecting PR analysis.
 
 The job fails when the Quality Gate fails. Coverage must be generated in the
-job (`CUSTOMISE` marker) — SonarQube only imports reports. Parameters:
+job — SonarQube only imports reports. Parameters:
 [analysis parameters](https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/analysis-parameters/).

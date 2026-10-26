@@ -25,7 +25,7 @@ py.buildPythonApplication {
     hash = "sha256-jt7+FUtxF5YvLogxjzFfxLuWFYJ/kys3y2dqjUKjooY=";
   };
   dependencies = [ click py.jsonschema py.regress py.requests py.ruamel-yaml ];
-  # The dev shell's PYTHONPATH carries nixpkgs' older click (via podman-compose);
-  # keep this tool on its own dependencies.
+  # Keep this tool on its own dependencies: a PYTHONPATH from the dev shell
+  # must not shadow them.
   makeWrapperArgs = [ "--unset" "PYTHONPATH" ];
 }

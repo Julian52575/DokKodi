@@ -1,0 +1,155 @@
+name: release-to-installer
+
+# Builds the installers and attaches them to the release that triggered it:
+#
+#   DokKodi-Desktop-linux-amd64.deb      desktop, Debian/Ubuntu
+#   DokKodi-Desktop-windows-x64.msi      desktop, Windows
+#   DokKodi-Remote-android-universal.apk mobile, Android (all ABIs in one APK)
+#
+# Names are <app>-<os>-<arch>.<ext>: the arch is Debian's for .deb (amd64) and
+# Microsoft's for .msi (x64). The mobile app is an Android app, so it ships as
+# an .apk, signed with Expo's debug keystore: fine for sideloading, not for the
+# Play Store. Add a release keystore before publishing there.
+#
+#   release created     -> assets are uploaded to that release
+#   workflow_dispatch   -> assets are kept as workflow artifacts only
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: DokKodi-Desktop (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: write # attach assets to the release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-amd64
+            bundle: deb
+            pattern: "*.deb"
+            ext: deb
+          - os: windows-latest
+            name: windows-x64
+            bundle: msi
+            pattern: "*.msi"
+            ext: msi
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false # release builds must not use a restored cache
+
+      - name: Install the Tauri system libraries
+        if: runner.os == 'Linux'
+        run: |
+          # Refresh the Ubuntu archive only: the runner's other sources (Microsoft,
+          # Azure, Chrome, ...) make a full update slow and are not needed here.
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=/dev/null \
+            -o APT::Get::List-Cleanup=0
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libssl-dev
+
+      - name: Build the installer
+        working-directory: desktop
+        env:
+          BUNDLE: ${{ matrix.bundle }}
+        run: |
+          npm ci
+          npm run tauri build -- --bundles "$BUNDLE"
+
+      - name: Name the installer
+        env:
+          PATTERN: ${{ matrix.pattern }}
+          TARGET: ${{ matrix.name }}
+          EXT: ${{ matrix.ext }}
+        run: |
+          mkdir -p dist-assets
+          src=$(find desktop/src-tauri/target/release/bundle -type f -name "$PATTERN" | head -n1)
+          [ -n "$src" ] || { echo "::error::no $PATTERN installer was built"; exit 1; }
+          cp "$src" "dist-assets/DokKodi-Desktop-${TARGET}.${EXT}"
+          ls -l dist-assets
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: DokKodi-Desktop-${{ matrix.name }}
+          path: dist-assets
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  remote:
+    name: DokKodi-Remote (android-universal)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # attach the APK to the release
+    steps:
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false # release builds must not use a restored cache
+
+      # The runner image ships the Android SDK and a JDK; Gradle needs 17+.
+      - name: Build the release APK
+        working-directory: mobile
+        run: |
+          npm ci
+          npx expo prebuild --platform android
+          cd android && ./gradlew assembleRelease
+
+      - name: Name the APK
+        run: |
+          mkdir -p dist-assets
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk dist-assets/DokKodi-Remote-android-universal.apk
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: DokKodi-Remote-android-universal
+          path: dist-assets
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist-assets/* --clobber --repo "$GITHUB_REPOSITORY"
