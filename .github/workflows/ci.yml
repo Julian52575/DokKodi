@@ -129,7 +129,7 @@ jobs:
             echo "Security audit of the workflows: **$STATUS**. Findings are annotated on the changed files."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Software-composition analysis of THIS branch: osv-scanner finds every
+  # Software-composition analysis of THIS branch (last in the run: see needs): osv-scanner finds every
   # lockfile in the repo (npm, pip, go, cargo, maven, ...) and checks it
   # against the OSV database, so it needs no per-language setup.
   #
@@ -139,6 +139,9 @@ jobs:
   # count as Moderate. Counts and advisories land in the job summary and the
   # raw report uploads as an artifact, pass or fail.
   dependencies-audit:
+    # Runs last, even when a test job failed, so its verdict never hides theirs.
+    needs: [devshell, workflow-lint, zizmor, node, desktop-rust]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
