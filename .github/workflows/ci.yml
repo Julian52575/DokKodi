@@ -388,7 +388,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.desktop_rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60 # the first apt install is slow; later runs reuse its cache
     env:
       CARGO_INCREMENTAL: "0" # a CI build starts clean; incremental data only bloats the cache
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -410,6 +410,16 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      # The WebKit -dev closure is the slow part, so keep the downloaded .deb
+      # files. Bump the v1 in the key to force a refresh. A cache saved on main
+      # is readable by every PR; one saved inside a PR only by that PR.
+      - name: Restore the apt downloads
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-libwebkit2gtk-4.1-dev-v1
+
       # Compiling needs only this -dev package: it depends on GTK 3, libsoup 3,
       # GLib, Cairo, Pango and D-Bus. librsvg is for bundling and nothing in
       # Cargo.lock needs OpenSSL.
@@ -422,7 +432,18 @@ jobs:
             -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
             -o Dir::Etc::sourceparts=/dev/null \
             -o APT::Get::List-Cleanup=0
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
+          mkdir -p "$HOME/apt-archives/partial"
+          sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::archives="$HOME/apt-archives" \
+            libwebkit2gtk-4.1-dev
+          sudo chown -R "$USER" "$HOME/apt-archives"
+
+      - name: Save the apt downloads
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-libwebkit2gtk-4.1-dev-v1
 
       # clippy (check) and test (build) cannot share compiled artifacts, but
       # both reuse the dependencies compiled by an earlier run. A PR with a
