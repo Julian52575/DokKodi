@@ -6,12 +6,35 @@ the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
-1. `nix develop` (or `direnv allow`): creates `.env`, fills `change-me-*`
-   secrets, enables the git hooks.
-2. `just up -d`, then open <http://localhost:8000>.
+1. Install [Nix](https://install.determinate.systems/) with flakes, then run
+   `nix develop` (or `direnv allow`) in the repo. It puts every tool on
+   `PATH`, creates `.env`, fills `change-me-*` secrets and enables the git
+   hooks.
+2. Set up commit signing once (see [Branches and commits](#2-branches-and-commits)):
+   the `commit-msg` hook rejects unsigned commits.
+3. `just install`, then `just dev` to run the desktop app and the Expo
+   server together. Work on one app with `just desktop-dev` or
+   `just mobile-start`. The first time you enter the shell in a terminal, it
+   installs the Android SDK for mobile builds and asks you to accept Google's
+   licences; set `ANDROID_SDK_INSTALL=0` in `.env` to skip that.
+4. Before every push, run `just ci`: the desktop lint/type-check/build and
+   `cargo fmt`/`clippy`/`test`, the mobile lint and type-check, and the
+   workflow lint. These are the same checks CI runs.
 
-Without Nix: `cp .env.example .env`, install `just` and Podman or Docker, and
-run `git config core.hooksPath .githooks`.
+Without Nix: `cp .env.example .env`, install `just`, Node.js 24, Rust and the
+[Tauri prerequisites](https://tauri.app/start/prerequisites/), and run
+`git config core.hooksPath .githooks`. The [README](README.md#requirements)
+lists the details.
+
+## Where things live
+
+| Path | What |
+| ---- | ---- |
+| `desktop/src/` | desktop frontend (React + Vite + Tailwind + shadcn/ui) |
+| `desktop/src-tauri/` | desktop backend (Rust); `#[tauri::command]` functions are called from React with `invoke` |
+| `mobile/` | Android app (Expo / React Native + NativeWind); `app.json` configures it, `android/` is generated and git-ignored |
+| `nix/`, `flake.nix` | the dev shell, one pinned tool per file |
+| `.github/workflows/` | CI, releases, SAST, Scorecard |
 
 ## The chain
 
@@ -34,11 +57,12 @@ flowchart LR
 
 ### 2. Branches and commits
 
-- Branch from `main` (`feat/add-grid`, `42-fix-proxy-crash`). No direct pushes
+- Branch from `main` (`feat/add-settings-page`, `42-fix-window-crash`). No direct pushes
   to `main`; rebase rather than merging `main` in.
 - Commits and PR titles are [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#summary):
   `<type>[(scope)][!]: description`, lower-case description, no trailing
-  period. Types: `feat fix docs style refactor perf test build ci chore revert`.
+  period (for example `feat(mobile): add a settings screen`; scopes in use are
+  `desktop`, `mobile`, `ci`, `nix`, `docs`). Types: `feat fix docs style refactor perf test build ci chore revert`.
   [Cheatsheet](https://gist.github.com/qoomon/5dfcdf8eec66a051ecd85625518cfd13#commit-message-formats).
 - The type sets the next version: `fix` → patch, `feat` → minor, `!` or a
   `BREAKING CHANGE:` footer → major; other types don't release.
@@ -71,12 +95,10 @@ lives in both `.githooks/check-conventional-commit-msg` and
 | ----- | -------- | ----------------- |
 | `conventional-title` (advisory) | PR title (and a lone commit) is a Conventional Commit | — edit the title, it re-runs |
 | `ci-required` ← `devshell` | the flake evaluates | `nix flake check --no-build` |
-| `ci-required` ← `node` | each Node.js service lints, tests and builds | `npm run lint && npm test` in its folder |
-| `ci-required` ← `dockerfile-lint` | hadolint on every Dockerfile | `hadolint <file>` |
-| `ci-required` ← `compose-lint` | compose file resolves | `podman-compose config` |
+| `ci-required` ← `node` (desktop, mobile) | each app lints, type-checks and builds | `just desktop-check`, `just mobile-check` |
+| `ci-required` ← `desktop-rust` | the Tauri crate is formatted, clippy-clean and tested | `just desktop-check` |
 | `ci-required` ← `workflow-lint`, `zizmor` | workflows lint clean and pass the security audit | `just lint-workflows` |
 | `ci-required` ← `dependencies-audit` | no Critical/High and fewer than 5 Moderate+Low advisories | bump the dependency |
-| `ci-required` ← `stack` | the stack boots and every route answers | `just up -d && just logs` |
 | `ci-sast-required` (opt-in) | no CodeQL error; SonarQube gate passes | see [`.sast/README.md`](.sast/README.md) |
 
 Before opening: issue linked, PR title a Conventional Commit, branch rebased, `just lint-workflows` run if you
@@ -87,32 +109,30 @@ by line.
 
 Never by hand. release-please keeps a Release PR open with the next version
 and changelog; merging it tags the release (no `v` prefix), and
-`release-to-ghcr.yml` publishes signed images.
+`release-to-installer.yml` builds `DokKodi-Desktop-linux-amd64.deb`,
+`DokKodi-Desktop-windows-x64.msi` and `DokKodi-Remote-android-universal.apk`
+and attaches them to the release.
 
 ## Tools in the dev shell
 
-`just`, `podman`/`podman-compose`, `actionlint` + `shellcheck`, `zizmor`
-(same version as CI), `check-jsonschema`, `pin-github-action` (pins `uses:` to
-commit SHAs) and `jq`.
+`just`, Node.js (`npm`, `npx`), the Rust toolchain (`cargo`, `clippy`,
+`rustfmt`, all official binaries), a Temurin JDK 17 for Gradle, the Android
+command-line tools (`sdkmanager`), the Tauri system libraries on Linux,
+`actionlint` + `shellcheck`, `zizmor` (same version as CI),
+`check-jsonschema`, `pin-github-action` (pins `uses:` to commit SHAs) and
+`jq`. The Android SDK itself is not packaged: the shell installs it into
+`ANDROID_HOME` on the first interactive entry.
 
 ## Troubleshooting
-
-**Stack not working?** Run `just compose-diagnostic` first. It checks the
-container tool, `.env`, the compose file, each container's state, health and
-logs, the host ports, Traefik's routes and the disk, then lists what looks
-wrong in plain words. The full report (logs and state) is saved as
-`.compose-diagnostic-<time>.md` (git-ignored) with `.env` values and other
-credentials masked: skim it, then attach it to your bug issue or send it to
-the DevOps team.
 
 Record every incident under [`docs/troubleshooting/`](docs/troubleshooting/),
 in a subfolder per area, one Markdown file per incident:
 
 ```
 docs/troubleshooting/
-├── podman/not-a-directory-on-wsl.md
-├── ci/stack-job-timeout.md
-└── backend/prisma-openssl-missing.md
+├── desktop/webkit2gtk-missing-on-linux.md
+├── mobile/gradle-cannot-find-android-sdk.md
+└── ci/desktop-rust-job-timeout.md
 ```
 
 Each file names the **Error** (what was observed), its **Occurrences**
@@ -121,15 +141,13 @@ who wasn't there. Same cause as an existing entry? Add an occurrence to it
 instead of a new file; link related entries by relative path. Example:
 
 ```markdown
-# Podman "Not a directory" when starting the stack
+# Gradle cannot find the Android SDK
 
-**Error:** `just up` fails with `mount ... not a directory` on every container.
+**Error:** `just mobile-apk` fails with `SDK location not found`.
 
-**Occurrences:** 2026-01-01 (WSL2, repo under /mnt/c).
+**Occurrences:** 2026-01-01 (Linux, SDK installed by Android Studio).
 
-**Cause:** the repo sits on a network/virtualised filesystem; overlay storage
-needs POSIX semantics.
+**Cause:** `ANDROID_HOME` is unset and the SDK is not in `~/Android/Sdk`.
 
-**Solution:** set `PODMAN_STORAGE_DIR` to a path on a local disk, or move the
-repo into the Linux filesystem.
+**Solution:** set `ANDROID_HOME` in `.env` to the SDK directory.
 ```

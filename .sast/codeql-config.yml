@@ -4,17 +4,18 @@
 #   https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning
 name: "CodeQL"
 
-# CUSTOMISE: limit analysis to your sources (honoured for interpreted
-# languages); keep in step with sonar.sources in sonar-project.properties.
-# paths:
-#   - backend
-#   - frontend
+# Keep in step with sonar.sources in sonar-project.properties.
+paths:
+  - desktop/src
+  - desktop/src-tauri/src
+  - mobile
 
 paths-ignore:
   - "**/*.min.js"
   - "**/*.min.css"
   - "**/dist/**"
   - "**/node_modules/**"
+  - "**/target/**"
   - ".sast/report/**"
 
 # The default `code-scanning` suite runs when this is omitted. Widen with:

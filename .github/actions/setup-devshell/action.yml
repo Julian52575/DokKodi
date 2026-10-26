@@ -21,7 +21,7 @@ runs:
 
     # Caches this repo's Nix store paths in the GitHub Actions cache (no
     # external account/secret needed -- works out of the box for anyone who
-    # clones this template). Restores here, saves automatically at job end.
+    # clones this repository). Restores here, saves automatically at job end.
     # Most packages in this flake also come pre-built from cache.nixos.org;
     # this mainly helps once the flake grows its own derivations, and saves
     # re-downloading on every run. See the README for the Cachix upgrade path.
