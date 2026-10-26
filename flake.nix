@@ -68,6 +68,12 @@
               set +a
             fi
 
+            # --- host compiler paths -------------------------------------
+            # A host CPATH (e.g. /usr/include from ~/.bashrc) leaks the host's
+            # glibc headers into every compiler, and the Android NDK's clang
+            # then fails on them (`bits/wordsize.h` not found).
+            unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH
+
             # --- Android SDK ---------------------------------------------
             # Installed outside the Nix store (it is large) on the first
             # interactive entry, once you have accepted Google's licences;
@@ -77,12 +83,18 @@
             export PATH="$ANDROID_HOME/platform-tools:$PATH"
             if [ ! -d "$ANDROID_HOME/platform-tools" ] && [ "''${ANDROID_SDK_INSTALL:-1}" != 0 ]; then
               if [ -t 0 ] && [ -t 1 ]; then
-                echo "android: no SDK at $ANDROID_HOME -- installing it (Ctrl-C to skip)"
-                mkdir -p "$ANDROID_HOME"
-                # Prompts for each licence and waits for your answer.
-                sdkmanager --sdk_root="$ANDROID_HOME" --licenses \
-                  && sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" \
-                  || echo "android: SDK install did not finish; re-enter the shell to retry" >&2
+                echo "android: no SDK at $ANDROID_HOME. Installing it means accepting Google's licences:"
+                echo "           https://developer.android.com/studio/terms"
+                echo "           (sdkmanager --licenses lists the others; read them with it first if you prefer)"
+                read -r -p "android: accept them and install the SDK? [y/N] " android_answer
+                case "$android_answer" in
+                  [yY]*)
+                    mkdir -p "$ANDROID_HOME"
+                    yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses >/dev/null \
+                      && sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" \
+                      || echo "android: SDK install did not finish; re-enter the shell to retry" >&2 ;;
+                  *) echo "android: skipped; re-enter the shell to be asked again (ANDROID_SDK_INSTALL=0 stops the question)" ;;
+                esac
               else
                 echo "android: no SDK at $ANDROID_HOME -- enter 'nix develop' in a terminal to install it" >&2
               fi

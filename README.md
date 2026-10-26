@@ -31,8 +31,8 @@ One repository, two apps, one dev shell:
    `just dev` installs missing dependencies itself, so step 3's first line is
    optional. Work on one app only with `just desktop-dev` or `just mobile-start`.
 4. **Mobile only:** the first `nix develop` in a terminal (step 2) also installs the
-   Android SDK into `ANDROID_HOME` (default `~/Android/Sdk`) and waits while
-   you accept Google's licences. It is skipped when the SDK is already
+   Android SDK into `ANDROID_HOME` (default `~/Android/Sdk`) and asks you to
+   accept Google's licences (it links them). It is skipped when the SDK is already
    there, or with `ANDROID_SDK_INSTALL=0` in `.env`. Press `a` in the Expo terminal
    to open the app on an emulator or a connected device, or run
    `just mobile-android`. Desktop work needs no Android SDK.
@@ -96,12 +96,14 @@ command under each step once from the repo root instead.
 
 3. **Locates the Android SDK**: `ANDROID_HOME` (else `~/Android/Sdk`) is
    exported and its `platform-tools` added to `PATH`. When there is no SDK
-   and the shell is interactive, it runs `sdkmanager --licenses` (waiting for
-   your answers) and installs `platform-tools`; Gradle fetches the rest on the
-   first build. Non-interactive entries (CI, scripts) never install.
+   and the shell is interactive, it links to
+   [Google's licence terms](https://developer.android.com/studio/terms) and
+   asks once whether you accept; on `y` it accepts the licences and installs
+   `platform-tools`, and Gradle fetches the rest on the first build.
+   Non-interactive entries (CI, scripts) never install.
 
    ```bash
-   sdkmanager --sdk_root="$ANDROID_HOME" --licenses
+   yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
    sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools"
    ```
 

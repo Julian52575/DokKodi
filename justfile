@@ -52,9 +52,9 @@ mobile-android: _deps
 mobile-prebuild: _deps
     cd mobile && npx expo prebuild --platform android
 
-# Build a release APK into mobile/android/app/build/outputs/apk/release
-mobile-apk: mobile-prebuild
-    cd mobile/android && ./gradlew assembleRelease
+# Build a release APK for one CPU architecture (a local build is ~4x cheaper than CI's universal APK)
+mobile-apk abi="arm64-v8a": mobile-prebuild
+    cd mobile/android && ./gradlew assembleRelease --no-daemon --console=plain -x lint -PreactNativeArchitectures={{abi}}
 
 # Lint and type-check the mobile app
 mobile-check:
