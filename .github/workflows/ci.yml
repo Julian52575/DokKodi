@@ -410,36 +410,26 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
-      # Keep the downloaded .deb files: the WebKit closure is the slow part.
-      - name: Restore the apt downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/apt-archives
-          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-
       # Compiling needs only this -dev package: it depends on GTK 3, libsoup 3,
       # GLib, Cairo, Pango and D-Bus. librsvg is for bundling and nothing in
       # Cargo.lock needs OpenSSL.
       - name: Install the Tauri system libraries
         working-directory: .
         run: |
-          mkdir -p "$HOME/apt-archives/partial"
           # Refresh the Ubuntu archive only: the runner's other sources (Microsoft,
           # Azure, Chrome, ...) make a full update slow and are not needed here.
           sudo apt-get update \
             -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
             -o Dir::Etc::sourceparts=/dev/null \
             -o APT::Get::List-Cleanup=0
-          sudo apt-get install -y --no-install-recommends \
-            -o Dir::Cache::archives="$HOME/apt-archives" \
-            -o Dpkg::Options::=--force-unsafe-io \
-            libwebkit2gtk-4.1-dev
-          sudo chown -R "$USER" "$HOME/apt-archives"
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
 
       # clippy (check) and test (build) cannot share compiled artifacts, but
-      # both reuse the dependencies compiled by an earlier run.
+      # both reuse the dependencies compiled by an earlier run. A PR with a
+      # new Cargo.lock starts from main's closest cache.
       - name: Restore the Cargo build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -459,6 +449,17 @@ jobs:
         run: |
           set -o pipefail
           cargo test 2>&1 | tee ../../rust-test.log
+
+      # Saved even when a test failed: the compiled dependencies are still good.
+      - name: Save the Cargo build
+        if: "!cancelled() && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'"
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
 
       - name: Job summary
         if: always()
