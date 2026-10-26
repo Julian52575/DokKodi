@@ -28,12 +28,12 @@ jobs:
   # areas whose files changed run; the others are skipped (ci-required accepts
   # a skip, never a failure). Pushes to main and manual runs check everything.
   #
-  #   desktop-node   desktop/ outside src-tauri/   (the React frontend)
-  #   desktop-rust   desktop/src-tauri/ and any *.rs
-  #   mobile-node    mobile/
-  #   devshell       flake, nix/, justfile, .env.example, the setup action
-  #   workflows      .github/
-  #   audit          lockfiles
+  #   node (desktop)  desktop/ outside src-tauri/   (the React frontend)
+  #   node (mobile)   mobile/
+  #   rust (desktop)  desktop/src-tauri/ and any *.rs
+  #   devshell        flake, nix/, justfile, .env.example, the setup action
+  #   workflows       .github/
+  #   audit           lockfiles
   #
   # A change to this file runs everything.
   changes:
@@ -383,11 +383,15 @@ jobs:
 
   # The Tauri backend: format, lint and test the Rust crate. The frontend is
   # built first because tauri::generate_context! embeds ../dist.
-  desktop-rust:
+  rust:
+    name: rust (desktop)
     needs: changes
     if: needs.changes.outputs.desktop_rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      CARGO_INCREMENTAL: "0" # a CI build starts clean; incremental data only bloats the cache
+      CARGO_PROFILE_DEV_DEBUG: "0"
     defaults:
       run:
         working-directory: desktop
@@ -406,9 +410,20 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      # Keep the downloaded .deb files: the WebKit closure is the slow part.
+      - name: Restore the apt downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+
+      # Compiling needs only this -dev package: it depends on GTK 3, libsoup 3,
+      # GLib, Cairo, Pango and D-Bus. librsvg is for bundling and nothing in
+      # Cargo.lock needs OpenSSL.
       - name: Install the Tauri system libraries
         working-directory: .
         run: |
+          mkdir -p "$HOME/apt-archives/partial"
           # Refresh the Ubuntu archive only: the runner's other sources (Microsoft,
           # Azure, Chrome, ...) make a full update slow and are not needed here.
           sudo apt-get update \
@@ -416,7 +431,22 @@ jobs:
             -o Dir::Etc::sourceparts=/dev/null \
             -o APT::Get::List-Cleanup=0
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libssl-dev
+            -o Dir::Cache::archives="$HOME/apt-archives" \
+            -o Dpkg::Options::=--force-unsafe-io \
+            libwebkit2gtk-4.1-dev
+          sudo chown -R "$USER" "$HOME/apt-archives"
+
+      # clippy (check) and test (build) cannot share compiled artifacts, but
+      # both reuse the dependencies compiled by an earlier run.
+      - name: Restore the Cargo build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
 
       - run: npm ci
       - run: npm run build
@@ -438,7 +468,7 @@ jobs:
         run: |
           icon='⚪'; [ "$STATUS" = success ] && icon='✅'; [ "$STATUS" = failure ] && icon='❌'
           {
-            echo "### $icon desktop-rust"
+            echo "### $icon rust (desktop)"
             echo
             echo "Format (\`cargo fmt\`), lint (\`clippy\`) and tests: **$STATUS**."
             echo
@@ -459,7 +489,7 @@ jobs:
       - workflow-lint
       - zizmor
       - node
-      - desktop-rust
+      - rust
       - dependencies-audit
     runs-on: ubuntu-latest
     timeout-minutes: 5

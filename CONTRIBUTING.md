@@ -93,7 +93,7 @@ everything.
 | --- | ------------------------ | ----------------- |
 | `node` (desktop) | `desktop/` outside `src-tauri/` | `just desktop-check` |
 | `node` (mobile) | `mobile/` | `just mobile-check` |
-| `desktop-rust` | `desktop/src-tauri/` or any `*.rs` | `just desktop-check` |
+| `rust` (desktop) | `desktop/src-tauri/` or any `*.rs` | `just desktop-check` |
 | `devshell` | `flake.nix`, `flake.lock`, `nix/`, `justfile`, `.env.example` | `nix flake check --no-build` |
 | `workflow-lint`, `zizmor` | `.github/` | `just lint-workflows` |
 | `dependencies-audit` | a `package-lock.json` or `Cargo.lock` | bump the dependency |
