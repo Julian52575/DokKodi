@@ -22,6 +22,11 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+axum = "0.8.9"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net"] }
+uuid = { version = "1.26.1", features = ["v4"] }
+local-ip-address = "0.6.13"
+tower-http = { version = "0.7.1", features = ["cors"] }
 
 
 # Debug builds were 5 GB: keep line tables for backtraces, drop the rest.

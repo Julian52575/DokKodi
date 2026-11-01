@@ -1,5 +1,6 @@
 {
   "expo": {
+    "scheme": "epiKodi",
     "name": "mobile",
     "slug": "mobile",
     "version": "1.0.0",
@@ -17,12 +18,16 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-secure-store",
+      "expo-router"
     ],
     "orientation": "portrait",
     "icon": "./src/assets/icon.png",
     "userInterfaceStyle": "light",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true
     },

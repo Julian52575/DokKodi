@@ -5,6 +5,8 @@ import "./App.css";
 
 import { Button } from "@/components/ui/button";
 
+import { PairingQRCode } from "@/components/PairingQRCode";
+
 function App() {
   const [greetMsg, setGreetMsg] = useState("");
   const [name, setName] = useState("");
@@ -45,6 +47,11 @@ function App() {
         <Button type="submit">Greet</Button>
       </form>
       <p>{greetMsg}</p>
+      <div className="flex flex-col items-center gap-4 bg-blue-500">
+      <PairingQRCode />
+
+      </div>
+      
     </main>
   );
 }
