@@ -29,6 +29,7 @@
             librsvg
             glib
             openssl
+            nspr
           ]);
 
           # The Tauri binary links GTK and WebKit dynamically; point the loader
