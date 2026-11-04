@@ -37,6 +37,10 @@
             (pkgs.lib.makeLibraryPath (with pkgs; [
               webkitgtk_4_1 gtk3 libsoup_3 librsvg glib openssl
               cairo pango gdk-pixbuf harfbuzz atk dbus
+              # React Native DevTools is a prebuilt Electron binary
+              nss nspr alsa-lib cups expat libdrm libgbm libxkbcommon
+              xorg.libX11 xorg.libXcomposite xorg.libXdamage xorg.libXext
+              xorg.libXfixes xorg.libXrandr xorg.libxcb
             ]));
 
           shellHook = ''
