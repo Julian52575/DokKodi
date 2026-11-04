@@ -8,14 +8,14 @@ export default function NotFound() {
             <section className="profile-content">
                 <h1>404</h1>
                 <p className="profile-subtitle">
-                    Cette page n'existe pas.
+                    Not Found. The page you are looking for does not exist.
                 </p>
 
                 <button
                     className="create-button"
                     onClick={() => navigate("/profiles")}
                 >
-                    Retour aux profils
+                    Back to Profiles
                 </button>
             </section>
         </main>

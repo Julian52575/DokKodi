@@ -123,9 +123,9 @@ export default function ProfilePages({
 
             {page === "select" ? (
                 <section className="profile-content">
-                    <h1>Qui regarde DokKodi ?</h1>
+                    <h1>Who is watching DokKodi?</h1>
                     <p className="profile-subtitle">
-                        Sélectionnez votre profil pour continuer.
+                        Select your profile to continue.
                     </p>
 
                     <div className="profile-grid">
@@ -172,8 +172,7 @@ export default function ProfilePages({
                     </div>
 
                     <p className="profile-hint">
-                        Utilisez les flèches pour naviguer et Entrée pour
-                        sélectionner.
+                        Use the arrow keys to navigate between profiles and press Enter to select one.
                     </p>
                 </section>
             ) : (
@@ -182,12 +181,12 @@ export default function ProfilePages({
                         className="back-button"
                         onClick={goBack}
                     >
-                        <span aria-hidden="true">←</span> Retour
+                        <span aria-hidden="true">←</span> Back
                     </button>
 
-                    <h1>Créer un profil</h1>
+                    <h1>Create a Profile</h1>
                     <p className="profile-subtitle">
-                        Personnalisez votre expérience DokKodi.
+                        Customize your DokKodi experience.
                     </p>
 
                     <form
@@ -243,7 +242,7 @@ export default function ProfilePages({
                         </div>
 
                         <div className="form-group">
-                            <label>Couleur de l'avatar</label>
+                            <label>Avatar Color</label>
                             <div className="color-picker">
                                 {COLORS.map((item) => (
                                     <button
@@ -271,9 +270,9 @@ export default function ProfilePages({
                             />
                             <span className="custom-checkbox" />
                             <span>
-                                <strong>Profil enfant</strong>
+                                <strong>Child Profile</strong>
                                 <small>
-                                    Activer les restrictions du contrôle parental.
+                                    Enable parental control restrictions.
                                 </small>
                             </span>
                         </label>
@@ -283,7 +282,7 @@ export default function ProfilePages({
                             className="create-button"
                             disabled={!name.trim()}
                         >
-                            Créer le profil
+                            Create Profile
                         </button>
                     </form>
                 </section>
