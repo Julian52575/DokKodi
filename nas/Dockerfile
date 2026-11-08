@@ -14,8 +14,8 @@ ASSETS=/srv/assets
 
 # The folder is bind-mounted; seed it only when empty so user files are never overwritten.
 mkdir -p "$ASSETS"
-if [ -z "$(ls -A "$ASSETS")" ]; then
-    echo "assets folder is empty, extracting the bundled archive"
+if [ -z "$(find "$ASSETS" -type f ! -name .gitkeep | head -n 1)" ]; then
+    echo "assets folder has no files, extracting the bundled archive"
     tar --zstd -xf /opt/assets.tar.zst -C "$ASSETS"
 fi
 # Host user must be able to add and delete files.

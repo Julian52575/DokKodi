@@ -33,9 +33,11 @@ just nas-rm     # remove the container and image (assets are kept)
 `nas/assets/` is **git-ignored** and bind-mounted into the container, so files
 you add or delete on the host show up immediately.
 
-`nas/assets.tar.zst` is the tracked copy of the sample assets. When
-`nas/assets/` is empty or missing, the container extracts it on start. Existing
-files are never overwritten. To start from scratch, empty the folder and run
+Git tracks only the folder structure (a `.gitkeep` in each leaf folder), so the
+layout exists without unpacking anything. `nas/assets.tar.zst` is the tracked
+copy of the sample assets. When `nas/assets/` has no files besides `.gitkeep`,
+the container extracts it on start. Existing
+files are never overwritten. To start from scratch, delete the files (keep the `.gitkeep`s) and run
 `just nas-up` again.
 
 To refresh the archive after changing the assets:
