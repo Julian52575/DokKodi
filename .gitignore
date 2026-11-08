@@ -25,3 +25,7 @@ coverage/
 *.jks
 *.keystore
 Zone.Identifier
+
+# --- nas ---------------------------------------------------------
+# Mounted into the container; nas/assets.tar.zst is the tracked copy.
+/nas/assets/
