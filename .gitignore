@@ -25,3 +25,10 @@ coverage/
 *.jks
 *.keystore
 Zone.Identifier
+
+# --- nas ---------------------------------------------------------
+# Mounted into the container; nas/assets.tar.zst is the tracked copy. Only the
+# folder structure (.gitkeep) is tracked.
+/nas/assets/**
+!/nas/assets/**/
+!/nas/assets/**/.gitkeep

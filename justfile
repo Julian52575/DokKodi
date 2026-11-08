@@ -1,5 +1,6 @@
 set dotenv-load := true
 set shell := ["bash", "-eu", "-c"]
+export NAS_PORT := env("NAS_PORT", "8200")
 
 # List available recipes
 default:
@@ -59,6 +60,25 @@ mobile-apk abi="arm64-v8a": mobile-prebuild
 # Lint, type-check and test (with coverage) the mobile app
 mobile-check:
     cd mobile && npm run lint && npx tsc --noEmit && npm test
+
+#### NAS (local dev media server: SMB + NFS + DLNA)
+
+# Build and start the NAS, serving nas/assets (the folder is mounted, so new files appear live)
+nas-up:
+    mkdir -p nas/assets
+    docker build -t dokkodi-nas nas
+    docker rm -f dokkodi-nas > /dev/null 2>&1 || true
+    docker run -d --init --name dokkodi-nas -e NAS_PORT -p 1445:445 -p 2049:2049 -p $NAS_PORT:$NAS_PORT -v "$PWD/nas/assets:/srv/assets" dokkodi-nas
+    @echo "NAS up: smb://localhost:1445/assets | nfs localhost:/srv/assets (port=2049,mountport=2049) | dlna http://127.0.0.1:$NAS_PORT"
+
+# Stop the NAS container (keeps the container and image)
+nas-down:
+    docker stop dokkodi-nas
+
+# Remove the NAS container and image (nas/assets is untouched)
+nas-rm:
+    docker rm -f dokkodi-nas
+    docker rmi dokkodi-nas
 
 #### Everything
 
